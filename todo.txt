@@ -1,0 +1,5 @@
+Since favourites now live in localStorage, one thing to keep in mind for later: 
+when you eventually build the login/sync flow, you'll need a one-time merge step 
+(on first login, push any localStorage favourite IDs into the backend Favorite table, 
+then switch useFavourites to read from the API) 
+— worth noting as a follow-up task rather than something to solve in this pass.

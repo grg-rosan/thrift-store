@@ -1,0 +1,203 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [postgis]
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum ListingStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  DELETED
+}
+
+enum CommunityPostType {
+  EVENT
+  QUESTION
+  RECOMMENDATION
+  JOB
+}
+
+// ─────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────
+model User {
+  id                 String                                 @id @default(uuid())
+  phoneNumber        String                                 @unique // E.164 format, verified via OTP at API layer
+  passwordHash       String? // nullable if phone-OTP-only auth flow
+  name               String
+  profileImage       String? // Cloudinary secure_url
+  role               UserRole                               @default(USER)
+  // NFR7: coarse location only, no history table, no continuous tracking
+  latitude           Float
+  longitude          Float
+  location           Unsupported("geography(Point, 4326)")? // populated via trigger from lat/lng, indexed below
+  locationVerifiedAt DateTime                               @default(now()) // FR3: re-verify every 30 days, checked in app logic
+  // Denormalized rating — recompute via transaction/trigger on new Review, not on every read
+  avgRating          Float                                  @default(0)
+  ratingCount        Int                                    @default(0)
+  createdAt          DateTime                               @default(now())
+  updatedAt          DateTime                               @updatedAt
+  listings           Listing[]                              @relation("SellerListings")
+  reservedListings   Listing[]                              @relation("ReservedBy")
+  sentMessages       Message[]
+  buyerChatRooms     ChatRoom[]                             @relation("BuyerRooms")
+  sellerChatRooms    ChatRoom[]                             @relation("SellerRooms")
+  reviewsGiven       Review[]                               @relation("ReviewsGiven")
+  reviewsReceived    Review[]                               @relation("ReviewsReceived")
+  communityPosts     CommunityPost[]
+  communityComments  CommunityComment[]
+
+  @@index([latitude, longitude]) // fallback btree, not used once PostGIS index is live
+}
+
+// ─────────────────────────────────────────────
+// LISTINGS
+// ─────────────────────────────────────────────
+model Category {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  slug     String    @unique
+  listings Listing[]
+}
+
+model Listing {
+  id           String                                 @id @default(uuid())
+  sellerId     String
+  seller       User                                   @relation("SellerListings", fields: [sellerId], references: [id], onDelete: Cascade)
+  title        String
+  description  String
+  price        Decimal                                @db.Decimal(10, 2) // never Float for money
+  isFree       Boolean                                @default(false)
+  categoryId   String
+  category     Category                               @relation(fields: [categoryId], references: [id])
+  status       ListingStatus                          @default(AVAILABLE)
+  version      Int                                    @default(0) // optimistic lock — see reservation note below
+  reservedById String?
+  reservedBy   User?                                  @relation("ReservedBy", fields: [reservedById], references: [id])
+  latitude     Float
+  longitude    Float
+  location     Unsupported("geography(Point, 4326)")?
+  images       ListingImage[]
+  chatRooms    ChatRoom[]
+  reviews      Review[]
+  createdAt    DateTime                               @default(now())
+  updatedAt    DateTime                               @updatedAt
+  deletedAt    DateTime? // soft delete — preserves FK history for chat/reviews
+
+  @@index([sellerId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ListingImage {
+  id        String  @id @default(uuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  url       String // Cloudinary secure_url
+  publicId  String // Cloudinary public_id, needed to delete from Cloudinary on listing
+  order     Int     @default(0)
+
+  @@index([listingId])
+}
+
+// ─────────────────────────────────────────────
+// CHAT
+// ─────────────────────────────────────────────
+model ChatRoom {
+  id        String    @id @default(uuid())
+  listingId String
+  listing   Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyerId   String
+  buyer     User      @relation("BuyerRooms", fields: [buyerId], references: [id], onDelete: Cascade)
+  sellerId  String
+  seller    User      @relation("SellerRooms", fields: [sellerId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  createdAt DateTime  @default(now())
+
+  @@unique([listingId, buyerId]) // one thread per buyer per listing
+  @@index([sellerId])
+}
+
+model Message {
+  id         String    @id @default(uuid())
+  chatRoomId String
+  chatRoom   ChatRoom  @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User      @relation(fields: [senderId], references: [id])
+  content    String
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([chatRoomId, createdAt])
+}
+
+// ─────────────────────────────────────────────
+// REVIEWS
+// ─────────────────────────────────────────────
+model Review {
+  id         String   @id @default(uuid())
+  listingId  String
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer   User     @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  revieweeId String
+  reviewee   User     @relation("ReviewsReceived", fields: [revieweeId], references: [id])
+  rating     Int // enforce 1-5 via CHECK constraint (raw SQL migration)
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([listingId, reviewerId, revieweeId]) // one review per side per transaction
+  @@index([revieweeId])
+}
+
+// ─────────────────────────────────────────────
+// COMMUNITY BOARD (deliberately zero FK coupling to Listing/ChatRoom)
+// ─────────────────────────────────────────────
+model CommunityPost {
+  id        String                                 @id @default(uuid())
+  authorId  String
+  author    User                                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  type      CommunityPostType
+  title     String
+  content   String
+  latitude  Float
+  longitude Float
+  location  Unsupported("geography(Point, 4326)")?
+  comments  CommunityComment[]
+  createdAt DateTime                               @default(now())
+  updatedAt DateTime                               @updatedAt
+  deletedAt DateTime?
+
+  @@index([type])
+  @@index([authorId])
+}
+
+model CommunityComment {
+  id        String        @id @default(uuid())
+  postId    String
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime      @default(now())
+
+  @@index([postId])
+}

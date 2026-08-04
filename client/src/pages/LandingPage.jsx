@@ -6,7 +6,7 @@ import HeroCarousel from '../components/landing/HeroCarousel';
 import ListingGrid from '../components/landing/ListingGrid';
 import { getNearbyItems } from '../utils/mockApi';
 
-export default function LandingPage() {
+export default function LandingPage({ onAuthSuccess }) {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,8 +38,9 @@ export default function LandingPage() {
   }, []);
 
   const handleAuthSuccess = (userData) => {
-    console.log('User authenticated:', userData);
-    // Navigate to dashboard or update app state
+    console.log('[v0] User authenticated:', userData);
+    setShowAuthModal(false);
+    onAuthSuccess();
   };
 
   return (

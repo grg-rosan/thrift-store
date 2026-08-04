@@ -98,14 +98,28 @@ export const logout = () => {
 
 export const getGeolocation = () => {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      resolve(null);
+    // If geolocation not available, return fallback immediately
+    if (!navigator || !navigator.geolocation) {
+      console.log('[mockApi] Geolocation not available, using fallback');
+      resolve({
+        lat: 27.7172,
+        lng: 85.3240,
+        source: 'fallback', // Kathmandu
+        city: 'Kathmandu'
+      });
       return;
     }
     
+    // Set a hard timeout of 2 seconds
     const timeout = setTimeout(() => {
-      resolve(null);
-    }, 3000);
+      console.log('[mockApi] Geolocation timeout, using fallback');
+      resolve({
+        lat: 27.7172,
+        lng: 85.3240,
+        source: 'fallback', // Kathmandu
+        city: 'Kathmandu'
+      });
+    }, 2000);
     
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -116,9 +130,16 @@ export const getGeolocation = () => {
           source: 'user'
         });
       },
-      () => {
+      (error) => {
         clearTimeout(timeout);
-        resolve(null);
+        console.log('[mockApi] Geolocation error:', error.message);
+        // Return fallback on any error
+        resolve({
+          lat: 27.7172,
+          lng: 85.3240,
+          source: 'fallback', // Kathmandu
+          city: 'Kathmandu'
+        });
       }
     );
   });

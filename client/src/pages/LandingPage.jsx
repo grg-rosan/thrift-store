@@ -14,9 +14,24 @@ export default function LandingPage() {
   useEffect(() => {
     const loadItems = async () => {
       setIsLoading(true);
-      const mockItems = await getNearbyItems();
-      setItems(mockItems);
-      setIsLoading(false);
+      try {
+        // Add timeout to prevent infinite loading
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Loading timeout')), 5000)
+        );
+        
+        const mockItems = await Promise.race([
+          getNearbyItems(),
+          timeoutPromise
+        ]);
+        
+        setItems(mockItems);
+      } catch (err) {
+        console.log('[v0] Failed to load items, using empty list:', err.message);
+        setItems([]);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     loadItems();

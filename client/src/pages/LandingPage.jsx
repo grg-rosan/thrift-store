@@ -149,7 +149,7 @@ export default function LandingPage() {
       <section className="py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-2xl font-bold text-ink mb-6">More listings</h2>
-          <ListingGrid items={items} isLoading={isLoading} />
+          <ListingGrid items={items} isLoading={isLoading} onSignIn={() => setShowAuthModal(true)} />
         </div>
       </section>
 
